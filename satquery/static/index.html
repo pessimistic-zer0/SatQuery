@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SatQuery AI</title>
+<style>
+/* ---------------------------------------------------------------- fonts */
+@font-face { font-family: Barlow; src: url(/static/fonts/Barlow-400.woff2) format('woff2');
+             font-weight: 400; font-display: swap; }
+@font-face { font-family: Barlow; src: url(/static/fonts/Barlow-500.woff2) format('woff2');
+             font-weight: 500; font-display: swap; }
+@font-face { font-family: Barlow; src: url(/static/fonts/Barlow-600.woff2) format('woff2');
+             font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Plex Mono'; src: url(/static/fonts/IBMPlexMono-400.woff2) format('woff2');
+             font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Plex Mono'; src: url(/static/fonts/IBMPlexMono-500.woff2) format('woff2');
+             font-weight: 500; font-display: swap; }
+
+/* --------------------------------------------------------------- tokens */
+:root {
+  --sheet:      #e7eae4;   /* the map sheet the console is printed on */
+  --plate:      #fbfbf9;   /* raised surfaces */
+  --plate-sunk: #f1f3ee;
+  --graticule:  #c7cdc4;   /* hairlines, and the grid on the sheet */
+  --graticule-2:#dee2db;
+  --ink:        #1a211e;
+  --ink-soft:   #5c6862;
+  --ink-faint:  #8a948e;
+  --signal:     #0e7c86;   /* interaction only, never data */
+  --signal-sunk:#0a5d64;
+  --alarm:      #a8321f;
+  --caution:    #9a6410;
+  --ok:         #2f6f4a;
+
+  /* Mirrors satquery/imaging.py exactly, so legend and pixels agree. */
+  --c-water:      #3884ff;
+  --c-vegetation: #4abe6c;
+  --c-built_up:   #f06c54;
+  --c-bare_soil:  #d6b25c;
+  --c-land:       #9696a0;
+  --c-change:     #ff5ca0;
+  --c-increase:   #ff5c5c;
+  --c-decrease:   #60b0ff;
+  --c-cloud:      #ebebf5;
+  --c-sar_only:   #fac440;
+  --c-agreement:  #56c88c;
+  --c-disagreement:#e86060;
+
+  --sans: Barlow, ui-sans-serif, system-ui, sans-serif;
+  --mono: 'Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --rail: 384px;
+}
+
+/* ----------------------------------------------------------------- base */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font: 400 15px/1.55 var(--sans);
+  color: var(--ink);
+  background-color: var(--sheet);
+  /* A surveyor's graticule under everything, at the edge of visibility. */
+  background-image:
+    linear-gradient(to right, var(--graticule-2) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--graticule-2) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.005em; }
+p { margin: 0 0 .7em; }
+p:last-child { margin-bottom: 0; }
+ul { margin: 0; padding: 0; list-style: none; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------- masthead */
+.masthead {
+  display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+  padding: 18px 26px 15px;
+  background: var(--plate);
+  border-bottom: 1px solid var(--ink);
+}
+.wordmark { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.wordmark span { color: var(--signal); }
+.masthead p { margin: 0; color: var(--ink-soft); font-size: 14.5px; }
+.runtime {
+  margin-left: auto; display: flex; gap: 16px; align-items: baseline;
+  font-size: 12.5px; color: var(--ink-soft);
+}
+.runtime b { font-weight: 500; color: var(--ink); font-family: var(--mono); }
+
+/* --------------------------------------------------------------- layout */
+main {
+  display: grid; grid-template-columns: var(--rail) minmax(0, 1fr);
+  align-items: stretch; gap: 0;
+  min-height: calc(100vh - 58px);
+}
+.rail {
+  border-right: 1px solid var(--graticule);
+  background: var(--plate);
+}
+.rail-inner {
+  position: sticky; top: 0; max-height: 100vh; overflow-y: auto;
+  padding: 4px 0 30px;
+}
+.stage { padding: 24px 30px 60px; min-width: 0; }
+.block { padding: 20px 22px; border-top: 1px solid var(--graticule); }
+.block:first-child { border-top: 0; }
+.block > h2 {
+  font-size: 13.5px; font-weight: 600; color: var(--ink-soft);
+  margin-bottom: 12px;
+}
+.block > h2 .count { color: var(--ink-faint); font-weight: 400; }
+
+/* ------------------------------------------------------- input controls */
+.drop {
+  display: block;
+  border: 1px dashed var(--graticule); background: var(--plate-sunk);
+  padding: 20px 16px; text-align: center; cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.drop:hover, .drop.over { border-color: var(--signal); background: #eef5f5; }
+.drop strong { display: block; font-weight: 500; margin-bottom: 2px; }
+.drop small { color: var(--ink-soft); font-size: 12.5px; }
+.drop input { display: none; }
+
+.scenes { margin-top: 16px; }
+.scenes-lead { font-size: 12.5px; color: var(--ink-soft); margin-bottom: 8px; }
+.scene {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: transparent; border: 0; border-top: 1px solid var(--graticule);
+  padding: 10px 2px 11px;
+}
+.scene:last-child { border-bottom: 1px solid var(--graticule); }
+.scene:hover .scene-title { color: var(--signal); }
+.scene[disabled] { cursor: default; opacity: .45; }
+.scene-title { font-weight: 500; font-size: 14.5px; }
+.scene-title .plates { color: var(--ink-faint); font-weight: 400; font-family: var(--mono);
+                       font-size: 12px; margin-left: 6px; }
+.scene-blurb { color: var(--ink-soft); font-size: 13px; line-height: 1.4; }
+
+textarea#query {
+  width: 100%; min-height: 84px; resize: vertical; padding: 10px 11px;
+  background: var(--plate); border: 1px solid var(--graticule); border-radius: 2px;
+}
+textarea#query:focus { border-color: var(--signal); }
+.act {
+  margin-top: 10px; width: 100%; padding: 10px 14px; cursor: pointer;
+  background: var(--signal); color: #fff; border: 1px solid var(--signal-sunk);
+  border-radius: 2px; font-weight: 500;
+}
+.act:hover { background: var(--signal-sunk); }
+.act[disabled] { background: var(--graticule); border-color: var(--graticule);
+                 color: var(--ink-faint); cursor: default; }
+.suggest { margin-top: 14px; }
+.suggest-lead { font-size: 12.5px; color: var(--ink-soft); margin-bottom: 6px; }
+.suggest button {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: none; border: 0; border-left: 2px solid var(--graticule);
+  padding: 5px 0 5px 10px; margin-bottom: 5px; color: var(--ink-soft);
+  font-size: 13.5px; line-height: 1.4;
+}
+.suggest button:hover { border-left-color: var(--signal); color: var(--ink); }
+
+/* ------------------------------------------------- passport + band strip */
+.passport { border-top: 1px solid var(--graticule); padding: 12px 0 14px; }
+.passport:first-of-type { border-top: 0; padding-top: 0; }
+.passport-name { font-weight: 500; font-size: 14px; word-break: break-all; line-height: 1.35; }
+.passport-sensor { color: var(--ink-soft); font-size: 13px; margin-bottom: 9px; }
+
+/* The signature element: every band drawn at its own wavelength. */
+.bands { display: flex; gap: 2px; height: 26px; margin-bottom: 4px; }
+.band { flex: 1 1 0; position: relative; border-radius: 1px; }
+.band[data-pol] {
+  background-image: repeating-linear-gradient(45deg,
+    rgba(255,255,255,.34) 0 3px, transparent 3px 6px);
+}
+.band-scale {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
+  margin-bottom: 10px;
+}
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
+.facts dt { color: var(--ink-soft); }
+.facts dd { margin: 0; font-family: var(--mono); font-size: 12.5px; }
+
+/* --------------------------------------------------------------- checks */
+.verdict {
+  display: flex; align-items: baseline; gap: 9px; margin-bottom: 11px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--graticule);
+}
+.verdict b { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+.verdict.pass b { color: var(--ok); }
+.verdict.reject b { color: var(--alarm); }
+.verdict small { color: var(--ink-soft); font-size: 12.5px; }
+.check { display: grid; grid-template-columns: 13px 1fr; gap: 9px; margin-bottom: 8px;
+         font-size: 13px; line-height: 1.45; }
+.check i { font-style: normal; font-weight: 600; text-align: center; line-height: 1.5; }
+.check.pass i { color: var(--ok); }
+.check.warn i { color: var(--caution); }
+.check.fail i { color: var(--alarm); }
+.check-name { font-weight: 500; }
+.check-detail { color: var(--ink-soft); }
+
+/* --------------------------------------------------------------- stage */
+.stage-head { margin-bottom: 18px; max-width: 62ch; }
+.stage-head h1 { font-size: 25px; line-height: 1.22; margin-bottom: 8px; }
+.stage-head p { color: var(--ink-soft); }
+
+/* The pipeline: inert on the empty stage, filled in after a run. */
+.pipeline {
+  margin: 22px 0 0; border-top: 1px solid var(--ink);
+  background: rgba(251, 251, 249, .78);
+}
+.stage-row {
+  display: grid; grid-template-columns: 26px 116px 1fr auto;
+  gap: 14px; align-items: baseline;
+  padding: 9px 2px; border-bottom: 1px solid var(--graticule);
+}
+.stage-row.idle { color: var(--ink-faint); }
+.stage-ord { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); }
+.stage-kind { font-weight: 500; font-size: 13.5px; }
+.stage-body { min-width: 0; font-size: 13.5px; color: var(--ink-soft); line-height: 1.45; }
+.stage-tool { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+.stage-params { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint);
+                word-break: break-word; }
+.stage-rejected { font-family: var(--mono); font-size: 11.5px; color: var(--alarm); }
+.stage-ms { font-family: var(--mono); font-size: 12px; color: var(--ink-faint);
+            white-space: nowrap; }
+.stage-row .flag { font-family: var(--mono); font-size: 11.5px; }
+.flag.ok { color: var(--ok); } .flag.warn { color: var(--caution); }
+.flag.fail { color: var(--alarm); } .flag.pending { color: var(--ink-faint); }
+
+/* one deliberate moment: the stages arrive in the order they ran */
+@media (prefers-reduced-motion: no-preference) {
+  .pipeline.live .stage-row { opacity: 0; animation: settle .34s ease-out forwards; }
+  @keyframes settle { from { opacity: 0; transform: translateY(-3px); }
+                      to { opacity: 1; transform: none; } }
+}
+
+/* ------------------------------------------------------------- evidence */
+.plate {
+  background: var(--plate); border: 1px solid var(--ink); margin-bottom: 22px;
+}
+.plate-bar {
+  display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+  padding: 7px 10px; border-bottom: 1px solid var(--graticule);
+}
+.plate-bar h2 { font-size: 13.5px; margin-right: 8px; }
+.tab {
+  background: none; border: 1px solid transparent; cursor: pointer;
+  padding: 3px 9px; font-size: 12.5px; color: var(--ink-soft); border-radius: 2px;
+}
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { border-color: var(--graticule); background: var(--plate-sunk);
+                             color: var(--ink); font-weight: 500; }
+/* The imagery is mounted on a mat rather than stretched to the panel: satellite
+   scenes are rarely the panel's aspect ratio, and a cap keeps the measurement
+   and the picture on one screen. */
+.plate-mount {
+  background: var(--plate-sunk); padding: 14px;
+  border-bottom: 1px solid var(--graticule);
+  display: flex; justify-content: center;
+}
+.plate-img {
+  display: block; width: auto; max-width: 100%; max-height: 56vh;
+  border: 1px solid rgba(26, 33, 30, .22);
+}
+.legend { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 11px;
+          border-top: 1px solid var(--graticule); font-size: 12.5px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-soft); }
+.swatch { width: 13px; height: 13px; border: 1px solid rgba(26,33,30,.28); }
+.plate-caption { padding: 0 11px 10px; font-size: 12.5px; color: var(--ink-faint); }
+
+/* --------------------------------------------------------------- answer */
+.answer { max-width: 74ch; font-size: 16px; line-height: 1.6; margin-bottom: 16px; }
+.answer p { margin: 0 0 .75em; }
+.answer p:last-child { margin-bottom: 0; }
+.answer .measure { font-family: var(--mono); font-size: 15px; font-weight: 500; }
+.readout { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-end;
+           padding-bottom: 16px; border-bottom: 1px solid var(--graticule); margin-bottom: 20px; }
+.readout div { display: flex; flex-direction: column; gap: 3px; }
+.readout dt, .readout .label { font-size: 12.5px; color: var(--ink-soft); }
+.readout .value { font-family: var(--mono); font-size: 14px; font-weight: 500; }
+.meter { display: flex; gap: 2px; margin-top: 3px; }
+.meter i { width: 9px; height: 13px; background: var(--graticule); }
+.meter i.on { background: var(--ink); }
+.reject-note {
+  border-left: 3px solid var(--alarm); background: #fbf1ef;
+  padding: 12px 15px; margin-bottom: 20px; max-width: 74ch;
+}
+.reject-note b { display: block; margin-bottom: 4px; }
+.reject-note li { color: var(--ink-soft); font-size: 14px; }
+.notes { margin: 22px 0 0; max-width: 74ch; }
+.notes h2 { font-size: 13.5px; color: var(--ink-soft); margin-bottom: 7px; }
+.notes li { font-size: 13.5px; color: var(--ink-soft); line-height: 1.5;
+            padding-left: 14px; text-indent: -14px; margin-bottom: 4px; }
+.downloads { margin-top: 24px; display: flex; gap: 20px; align-items: baseline;
+             font-size: 13.5px; }
+.downloads a { color: var(--signal); }
+.downloads .run-id { margin-left: auto; font-family: var(--mono); font-size: 12px;
+                     color: var(--ink-faint); }
+.problem { border-left: 3px solid var(--alarm); padding: 10px 14px; background: #fbf1ef;
+           font-size: 13.5px; margin-top: 12px; }
+.working { color: var(--ink-soft); }
+
+@media (max-width: 940px) {
+  main { grid-template-columns: 1fr; }
+  .rail { position: static; max-height: none; border-right: 0;
+          border-bottom: 1px solid var(--ink); }
+  .stage { padding: 20px 18px 48px; }
+  .stage-row { grid-template-columns: 22px 1fr auto; }
+  .stage-kind { grid-column: 2; }
+  .stage-body { grid-column: 2 / -1; }
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wordmark">Sat<span>Query</span></div>
+  <p>Ask a question about satellite imagery.</p>
+  <div class="runtime" id="runtime"></div>
+</header>
+
+<main>
+  <section class="rail">
+   <div class="rail-inner">
+    <div class="block">
+      <h2>Imagery</h2>
+      <label class="drop" id="drop">
+        <input type="file" id="files" multiple accept=".tif,.tiff,.png,.jpg,.jpeg">
+        <strong>Drop a GeoTIFF, or choose a file</strong>
+        <small>One image, or two for a pair</small>
+      </label>
+      <div class="scenes" id="scenes"></div>
+      <div id="input-problem"></div>
+    </div>
+
+    <div class="block" id="passport-block" hidden>
+      <h2>Sensor passport <span class="count" id="passport-count"></span></h2>
+      <div id="passports"></div>
+    </div>
+
+    <div class="block" id="checks-block" hidden>
+      <h2>Compatibility</h2>
+      <div id="checks"></div>
+    </div>
+
+    <div class="block" id="query-block" hidden>
+      <h2>Question</h2>
+      <textarea id="query" placeholder="Type a question, or pick one below"></textarea>
+      <button class="act" id="run">Run query</button>
+      <div class="suggest" id="suggest"></div>
+    </div>
+   </div>
+  </section>
+
+  <section class="stage" id="stage" aria-live="polite"></section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let session = null;
+let currentRun = null;
+let plateIndex = 0;
+
+/* ------------------------------------------------------------------------
+   Wavelength to colour. The visible bands get their real colour; the
+   infrared bands do not have one, so they are given the conventional
+   false-colour reading - near infrared as deep red, short-wave infrared as
+   warm grey - which is how these bands are shown on every sensor diagram.
+   ------------------------------------------------------------------------ */
+const SPECTRUM = [
+  [440, [ 60,  40, 190]], [490, [ 30, 110, 225]], [560, [ 60, 175,  95]],
+  [665, [200,  55,  50]], [705, [150,  38,  44]], [783, [116,  30,  38]],
+  [865, [ 86,  26,  34]], [945, [ 92,  88,  84]], [1375, [126, 134, 148]],
+  [1610, [126, 104,  84]], [2190, [148, 128, 106]],
+];
+function bandColour(nm) {
+  if (nm == null) return "#8a948e";
+  if (nm <= SPECTRUM[0][0]) return `rgb(${SPECTRUM[0][1]})`;
+  const last = SPECTRUM[SPECTRUM.length - 1];
+  if (nm >= last[0]) return `rgb(${last[1]})`;
+  for (let i = 1; i < SPECTRUM.length; i++) {
+    const [hi, cHi] = SPECTRUM[i], [lo, cLo] = SPECTRUM[i - 1];
+    if (nm <= hi) {
+      const t = (nm - lo) / (hi - lo);
+      return `rgb(${cLo.map((v, k) => Math.round(v + t * (cHi[k] - v))).join(",")})`;
+    }
+  }
+  return "#8a948e";
+}
+
+/* ------------------------------------------------------------- runtime */
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  $("runtime").innerHTML =
+    `<span>tools <b>${h.tools_implemented}/${h.tools_registered}</b></span>` +
+    `<span>compute <b>${h.gpu.available ? esc(h.gpu.name) : "CPU"}</b></span>`;
+}).catch(() => { $("runtime").textContent = "the backend is not responding"; });
+
+/* --------------------------------------------------------------- scenes */
+fetch("/api/demos").then((r) => r.json()).then((d) => {
+  const rows = d.scenes.map((s) => `
+    <button class="scene" data-key="${esc(s.key)}" ${s.available ? "" : "disabled"}>
+      <div class="scene-title">${esc(s.title)}<span class="plates">${s.images} image${s.images > 1 ? "s" : ""}</span></div>
+      <div class="scene-blurb">${esc(s.blurb)}</div>
+    </button>`).join("");
+  $("scenes").innerHTML =
+    `<p class="scenes-lead">${d.hint ? esc(d.hint) : "Or load a prepared scene:"}</p>${rows}`;
+  document.querySelectorAll(".scene").forEach((b) =>
+    b.addEventListener("click", () => loadScene(b.dataset.key)));
+});
+
+/* ---------------------------------------------------------------- input */
+const drop = $("drop");
+["dragenter", "dragover"].forEach((e) => drop.addEventListener(e, (ev) => {
+  ev.preventDefault(); drop.classList.add("over");
+}));
+["dragleave", "drop"].forEach((e) => drop.addEventListener(e, (ev) => {
+  ev.preventDefault(); drop.classList.remove("over");
+}));
+drop.addEventListener("drop", (ev) => upload(ev.dataTransfer.files));
+$("files").addEventListener("change", (ev) => upload(ev.target.files));
+
+function problem(message) {
+  $("input-problem").innerHTML = message ? `<div class="problem">${esc(message)}</div>` : "";
+}
+
+async function upload(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  problem("");
+  if (files.length > 2) {
+    problem("Supply one image, or two for a pair. This system reads at most two at a time.");
+    return;
+  }
+  const body = new FormData();
+  files.forEach((f) => body.append("files", f));
+  await open(fetch("/api/upload", { method: "POST", body }));
+}
+
+async function loadScene(key) {
+  problem("");
+  await open(fetch(`/api/demos/${key}`, { method: "POST" }));
+}
+
+async function open(request) {
+  try {
+    const res = await request;
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "the imagery could not be read");
+    session = data;
+    renderSession(data);
+  } catch (err) {
+    problem(err.message);
+  }
+}
+
+/* ------------------------------------------------------------- passport */
+function bandStrip(p) {
+  const profile = p.band_profile;
+  if (!profile) return "";
+  const names = profile.names || [];
+  const waves = profile.wavelengths_nm || {};
+  const radar = !Object.keys(waves).length;
+  const cells = names.map((name) => {
+    const nm = waves[name];
+    const colour = radar ? "#3d4a55" : bandColour(nm);
+    const label = radar ? `polarisation ${name}` : `${name}, ${nm ? nm + " nm" : "unknown"}`;
+    return `<i class="band" style="background:${colour}" title="${esc(label)}"
+             ${radar ? 'data-pol="1"' : ""}></i>`;
+  }).join("");
+  const ends = radar
+    ? `<span>${esc(names[0] || "")}</span><span>${esc(names[names.length - 1] || "")}</span>`
+    : `<span>${waves[names[0]] || ""} nm</span><span>${waves[names[names.length - 1]] || ""} nm</span>`;
+  return `<div class="bands">${cells}</div><div class="band-scale">${ends}</div>`;
+}
+
+function renderSession(data) {
+  const list = data.passports.map((p, i) => `
+    <div class="passport">
+      <div class="passport-name">${esc(p.filename)}</div>
+      <div class="passport-sensor">${esc(p.sensor_guess || p.modality)}</div>
+      ${bandStrip(p)}
+      <dl class="facts">
+        <dt>Raster</dt><dd>${p.width} × ${p.height}, ${p.band_count} band${p.band_count > 1 ? "s" : ""}</dd>
+        <dt>Resolution</dt><dd>${p.gsd_x_m ? p.gsd_x_m.toFixed(1) + " m/px" : "no geometry"}</dd>
+        <dt>Reference</dt><dd>${esc(p.crs || "none")}</dd>
+        <dt>Extent</dt><dd>${p.area_km2 ? p.area_km2.toFixed(2) + " km²" : "pixel space"}</dd>
+        <dt>Acquired</dt><dd>${esc(p.acquisition_date || "unknown")}</dd>
+      </dl>
+    </div>`).join("");
+  $("passports").innerHTML = list;
+  $("passport-count").textContent = data.passports.length > 1 ? `(${data.passports.length})` : "";
+  $("passport-block").hidden = false;
+
+  const c = data.compatibility;
+  const ok = c.compatible;
+  $("checks").innerHTML = `
+    <div class="verdict ${ok ? "pass" : "reject"}">
+      <b>${esc(c.configuration.replace(/_/g, " "))}</b>
+      <small>${ok ? "ready to query" : "no model will run on this"}</small>
+    </div>
+    ${c.checks.map((k) => `
+      <div class="check ${esc(k.status)}">
+        <i>${k.status === "pass" ? "✓" : k.status === "warn" ? "!" : "✕"}</i>
+        <div><span class="check-name">${esc(k.name.replace(/_/g, " "))}</span>
+             <span class="check-detail">— ${esc(k.detail)}</span></div>
+      </div>`).join("")}`;
+  $("checks-block").hidden = false;
+
+  const suggestions = data.suggestions || [];
+  $("suggest").innerHTML = suggestions.length
+    ? `<p class="suggest-lead">Questions this scene can answer:</p>` +
+      suggestions.map((q) => `<button type="button">${esc(q)}</button>`).join("")
+    : "";
+  $("suggest").querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => { $("query").value = b.textContent; $("query").focus(); }));
+  $("query-block").hidden = false;
+  $("run").disabled = !ok;
+  if (suggestions.length && !$("query").value) $("query").value = suggestions[0];
+
+  currentRun = null;
+  renderStage();
+}
+
+/* ------------------------------------------------------------ the stage */
+const IDLE_STAGES = [
+  ["validate", "Read every image: sensor, resolution, footprint, date"],
+  ["compatibility", "Decide whether the images can be analysed together"],
+  ["interpret", "Work out which task the question is asking for"],
+  ["route", "Choose tools from the registry that suit the task and the imagery"],
+  ["tool", "Run them, with only the parameters each tool permits"],
+  ["integrate", "Combine the outputs, measure confidence, write the trace"],
+];
+
+function renderStage() {
+  if (!currentRun) {
+    $("stage").innerHTML = `
+      <div class="stage-head">
+        <h1>${session ? "Ask your question." : "Load imagery to begin."}</h1>
+        <p>${session
+          ? "The controller reads the question, picks the tools that fit it, and reports what it did."
+          : "Drop a GeoTIFF on the left, or load one of the prepared scenes. Answers come back with measured areas, the imagery marked up, and a record of every step."}</p>
+      </div>
+      <div class="pipeline">
+        ${IDLE_STAGES.map(([kind, what], i) => `
+          <div class="stage-row idle">
+            <span class="stage-ord">${i + 1}</span>
+            <span class="stage-kind">${kind}</span>
+            <span class="stage-body">${what}</span>
+            <span class="stage-ms"></span>
+          </div>`).join("")}
+      </div>`;
+    return;
+  }
+  const t = currentRun.trace;
+  const plates = (t.artifacts || []).filter((a) => a.format === "png");
+  if (plateIndex >= plates.length) plateIndex = 0;
+
+  $("stage").innerHTML =
+    (t.rejected ? rejectionHtml(t) : "") +
+    (plates.length ? plateHtml(plates) : "") +
+    (t.rejected ? "" : answerHtml(t)) +
+    traceHtml(t) +
+    notesHtml(t) +
+    downloadsHtml(t);
+
+  $("stage").querySelectorAll(".tab").forEach((b) =>
+    b.addEventListener("click", () => { plateIndex = Number(b.dataset.i); renderStage(); }));
+
+  const pipeline = $("stage").querySelector(".pipeline");
+  if (pipeline && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    pipeline.classList.add("live");
+    pipeline.querySelectorAll(".stage-row").forEach((row, i) => {
+      row.style.animationDelay = `${i * 55}ms`;
+    });
+  }
+}
+
+function rejectionHtml(t) {
+  return `<div class="reject-note">
+    <b>These images were refused before any model ran.</b>
+    <ul>${t.rejection_reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+  </div>`;
+}
+
+function plateHtml(plates) {
+  const plate = plates[plateIndex];
+  const file = plate.path.split("/").pop();
+  const tabs = plates.length > 1
+    ? plates.map((p, i) => `<button class="tab" data-i="${i}"
+        aria-selected="${i === plateIndex}">${esc(p.name.replace(/_/g, " "))}</button>`).join("")
+    : "";
+  const legend = (plate.legend || []).map((l) =>
+    `<span><i class="swatch" style="background:var(--c-${esc(l.class)}, rgb(${l.colour}))"></i>${esc(l.class.replace(/_/g, " "))}</span>`).join("");
+  return `<div class="plate">
+    <div class="plate-bar"><h2>Evidence</h2>${tabs}</div>
+    <div class="plate-mount">
+      <img class="plate-img" alt="${esc(plate.caption)}"
+           src="/api/runs/${esc(currentRun.run_id)}/artifacts/${esc(file)}">
+    </div>
+    ${legend ? `<div class="legend">${legend}</div>` : ""}
+    <div class="plate-caption">${esc(plate.caption)}</div>
+  </div>`;
+}
+
+function answerHtml(t) {
+  const filled = Math.round((t.confidence ?? 0) * 10);
+  const measured = esc(t.answer || "No tool produced an answer for this question.")
+    .replace(/(-?\d[\d.,]*\s?(?:km2|km²|%|dB|m\/px))/g,
+             (m) => `<span class="measure">${m.replace("km2", "km²")}</span>`);
+  const paragraphs = measured.split(/\n\n+/)
+    .map((para) => `<p>${para.replace(/\n/g, " ")}</p>`).join("");
+  return `<div class="answer">${paragraphs}</div>
+    <div class="readout">
+      <div><span class="label">Task</span><span class="value">${esc(t.task || "none")}</span></div>
+      <div><span class="label">Tools</span><span class="value">${esc((t.tools || []).join(", ") || "none")}</span></div>
+      <div><span class="label">Confidence</span>
+        <span class="value">${t.confidence != null ? t.confidence.toFixed(2) : "not measured"}</span>
+        <span class="meter">${Array.from({ length: 10 }, (_, i) =>
+          `<i class="${i < filled ? "on" : ""}"></i>`).join("")}</span></div>
+      <div><span class="label">Elapsed</span><span class="value">${Math.round(t.total_ms)} ms</span></div>
+    </div>`;
+}
+
+function flagClass(status) {
+  if (["ok", "pass"].includes(status)) return "ok";
+  if (["warn", "not_implemented", "no_answer", "no_tool", "skipped"].includes(status)) return "warn";
+  if (["fail", "failed", "rejected"].includes(status)) return "fail";
+  return "pending";
+}
+
+function traceHtml(t) {
+  return `<div class="pipeline">
+    ${t.steps.map((s) => {
+      const params = Object.keys(s.params || {}).length
+        ? `<div class="stage-params">${esc(JSON.stringify(s.params))}</div>` : "";
+      const rejected = Object.keys(s.rejected_params || {}).length
+        ? `<div class="stage-rejected">rejected: ${esc(Object.keys(s.rejected_params).join(", "))}</div>` : "";
+      return `<div class="stage-row">
+        <span class="stage-ord">${s.index}</span>
+        <span class="stage-kind">${esc(s.kind)}</span>
+        <span class="stage-body">
+          <span class="stage-tool">${esc(s.name)}</span>
+          <span class="flag ${flagClass(s.status)}">${esc(s.status)}</span>
+          <div>${esc(s.detail).slice(0, 260).replace(/km2/g, "km²")}</div>${params}${rejected}
+        </span>
+        <span class="stage-ms">${s.duration_ms.toFixed(1)} ms</span>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+function notesHtml(t) {
+  if (!t.warnings || !t.warnings.length) return "";
+  return `<div class="notes"><h2>Worth knowing</h2>
+    <ul>${t.warnings.map((w) => `<li>— ${esc(w)}</li>`).join("")}</ul></div>`;
+}
+
+function downloadsHtml(t) {
+  return `<div class="downloads">
+    <a href="/api/runs/${esc(t.run_id)}/report.pdf" download>Download the report</a>
+    <a href="/api/runs/${esc(t.run_id)}/report.json" download>Download the trace as JSON</a>
+    <span class="run-id">run ${esc(t.run_id)}</span>
+  </div>`;
+}
+
+/* ------------------------------------------------------------ the query */
+$("run").addEventListener("click", runQuery);
+$("query").addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") runQuery();
+});
+
+async function runQuery() {
+  if (!session) return;
+  const query = $("query").value.trim();
+  if (!query) { $("query").focus(); return; }
+  $("run").disabled = true;
+  $("run").textContent = "Running";
+  $("stage").innerHTML = `<p class="working">Reading the imagery…</p>`;
+  try {
+    const res = await fetch("/api/query", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: session.session_id, query }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "the query could not be run");
+    currentRun = data;
+    plateIndex = 0;
+    renderStage();
+  } catch (err) {
+    $("stage").innerHTML = `<div class="problem">${esc(err.message)}</div>`;
+  } finally {
+    $("run").disabled = false;
+    $("run").textContent = "Run query";
+  }
+}
+
+/* --------------------------------------------------------- deep links */
+/* /#scene=<key> loads that scene; adding &ask=1 also runs its first question.
+   Each demo can then live on its own bookmark rather than being assembled by
+   hand in front of an audience. */
+async function openFromHash() {
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const key = hash.get("scene");
+  if (!key) return;
+  await loadScene(key);
+  if (session && hash.get("ask")) {
+    const asked = hash.get("q");
+    if (asked) $("query").value = asked;
+    await runQuery();
+  }
+}
+
+renderStage();
+openFromHash();
+window.addEventListener("hashchange", openFromHash);
+</script>
+</body>
+</html>

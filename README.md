@@ -7,11 +7,16 @@ tool answers it, and what evidence supports the answer.
 
 SIH 2026 · problem statement **SIH26167** (ISRO / Department of Space).
 
-## Status: Phase A - the controller spine
+## Status: Phase C complete - the console
 
-The orchestration layer is complete and runs end to end. The analysis tools are
-declared in the registry with their real parameter schemas, and the ones that
-are not implemented yet say so rather than returning a fabricated result.
+The interface, the controller spine and the classical analysis layer all run end
+to end, on CPU, with no model weights.
+
+The controller spine (Phase A) and the classical analysis layer (Phase B) both
+run end to end, on CPU, with no model weights. Every answer carries square
+kilometres derived from the pixels, visual evidence on disk, and an execution
+trace. The neural specialists are declared in the registry and say plainly that
+they are pending rather than returning a fabricated result.
 
 | Component | State |
 | --- | --- |
@@ -21,8 +26,13 @@ are not implemented yet say so rather than returning a fabricated result.
 | Predefined tool registry with permitted-parameter enforcement | done |
 | Execution trace, JSON and PDF reports | done |
 | Synthetic fixtures with known ground truth | done |
-| HTTP API, CLI, minimal web console | done |
-| Spectral / SAR indices, change detection, reliability map, verifier | Phase B |
+| HTTP API and command line | done |
+| Web console: passports, evidence, trace, reports | done |
+| Spectral indices (NDVI, NDWI, MNDWI, NDBI, BSI) and land-cover areas | done |
+| SAR backscatter classes, Lee and median speckle filters | done |
+| Bi-temporal change detection, change map, signed area deltas | done |
+| Modality-Reliability Map (which sensor answered, and where) | done |
+| Physics Verifier (independent cross-check, measured confidence) | done |
 | Neural VQA, grounding, change and fusion models | Phase D |
 | BigEarthNet adaptation of the dual-branch encoder | Phase E |
 
@@ -105,14 +115,25 @@ satquery/
   compat.py         pair compatibility and configuration classification
   router.py         query interpretation and task routing
   registry.py       tool specs, permitted parameters, selection
-  tools/            the registry contents; geometry.py is implemented
+  tools/            the registry contents
+    geometry.py     scene and pair geometry
+    optical.py      spectral indices and land cover
+    sar.py          backscatter thresholds
+    change.py       bi-temporal change and area deltas
+    fusion.py       the Modality-Reliability Map
+    verify.py       the Physics Verifier
   controller.py     the agentic pipeline
   trace.py          the execution trace
   report.py         JSON and PDF export
   api.py            FastAPI application
   cli.py            command line
+  raster.py         reading pixels, normalisation, putting a pair on one grid
+  indices.py        spectral and radar indices, thresholds, mask hygiene
+  imaging.py        overlays, masks and other visual evidence
   fixtures/synth.py synthetic imagery with known ground truth
-tests/              55 tests over the above
+  static/           the console: one HTML file, fonts served locally
+  demos.py          the four prepared scenes
+tests/              102 tests over the above
 ```
 
 ## Synthetic fixtures
@@ -143,3 +164,67 @@ un-georeferenced PNG, to exercise the benchmark path.
 Upload is separate from query on purpose: the compatibility verdict is visible
 before a query runs, so a rejected pair is explained rather than appearing as a
 failed query.
+
+
+## What the measurements actually recover
+
+Run against the synthetic fixtures, where the planted answer is known:
+
+| Quantity | Planted | Measured |
+| --- | --- | --- |
+| Water area | 3.247 km² | 3.241 km² |
+| Vegetation area | 16.496 km² | 16.496 km² |
+| Bare soil area | 4.762 km² | 4.760 km² |
+| Built-up area | 1.710 km² | 1.641 km² |
+| Built-up change, 2022 to 2024 | +0.754 km² | +0.721 km² |
+| Water change, 2022 to 2024 | −1.198 km² | −1.196 km² |
+| Cloud cover in the optical image | 18% | 20% |
+
+The SAR built-up figure is deliberately conservative: a VV threshold of −5 dB
+recovers 1.08 km² of the 1.71 km² planted, because only the brightest scatterers
+clear the threshold. That is a real property of radar thresholding, not a bug,
+and the number moves with the `builtup_vv_db` parameter.
+
+## The three claims from the deck, and where they live
+
+**Sensor Passport** - `passport.py` and `sensors.py`. Reads resolution, sensor,
+wavelengths and footprint from the file itself, so an unfamiliar Cartosat-2S or
+RISAT scene is described rather than rejected, and answers come back in km².
+
+**Physics Verifier** - `tools/verify.py`. A claim about direction of change is
+checked against the shift in the scene-wide mean index, tested against its own
+standard error - a different statistic from the one that produced the claim.
+Where the check would be circular, the tool says so and adds no confidence
+rather than agreeing with itself.
+
+**Modality-Reliability Map** - `tools/fusion.py`. Reports per region which sensor
+answered. On the fixture, cloud hides 20% of the optical image, and 95% of the
+built-up area the radar finds lies underneath it - invisible to the optical
+sensor entirely.
+
+
+## The console
+
+`./scripts/serve.sh` puts it on http://127.0.0.1:8000.
+
+The left rail is the input and what was read from it; the right is the answer,
+the evidence and the record. Three things are worth pointing out:
+
+**The spectral band strip.** Every band of an uploaded image is drawn at its own
+wavelength - visible bands in their real colour, near infrared as deep red,
+short-wave infrared as warm grey, radar as hatched polarisation channels. It
+says at a glance which sensor you are holding and therefore which indices can be
+computed at all.
+
+**The pipeline is the empty state.** Before a query runs, the stage shows the six
+stages the controller will go through. After it runs, the same strip fills in
+with the tools that were chosen, the parameters they were allowed, and how long
+each took. The explanation and the record are the same object.
+
+**Prepared scenes and deep links.** Four scenes load in one click, and each is
+addressable: `/#scene=cross_modal&ask=1` loads the optical-radar pair and runs
+its first question immediately. Put one on a bookmark per demonstration rather
+than assembling them by hand in front of an audience.
+
+Fonts are served from `satquery/static/fonts`, so the interface needs no network
+at all once the server is running.

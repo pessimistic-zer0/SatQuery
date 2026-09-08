@@ -49,7 +49,8 @@
 
   --sans: Barlow, ui-sans-serif, system-ui, sans-serif;
   --mono: 'Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --rail: 384px;
+  --rail: 360px;
+  --ask: 330px;
 }
 
 /* ----------------------------------------------------------------- base */
@@ -91,16 +92,20 @@ button, input, textarea { font: inherit; color: inherit; }
 .runtime b { font-weight: 500; color: var(--ink); font-family: var(--mono); }
 
 /* --------------------------------------------------------------- layout */
+/* Three panes: what was read on the left, what came back in the middle,
+   what to ask on the right. The question sits nearest the answer it
+   produces, and neither pane pushes the evidence off the screen. */
 main {
-  display: grid; grid-template-columns: var(--rail) minmax(0, 1fr);
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr) var(--ask);
+  grid-template-areas: "rail stage ask";
   align-items: stretch; gap: 0;
   min-height: calc(100vh - 58px);
 }
-.rail {
-  border-right: 1px solid var(--graticule);
-  background: var(--plate);
-}
-.rail-inner {
+.rail { grid-area: rail; border-right: 1px solid var(--graticule); background: var(--plate); }
+.ask  { grid-area: ask;  border-left:  1px solid var(--graticule); background: var(--plate); }
+.stage { grid-area: stage; }
+.rail-inner, .ask-inner {
   position: sticky; top: 0; max-height: 100vh; overflow-y: auto;
   padding: 4px 0 30px;
 }
@@ -153,6 +158,7 @@ textarea#query:focus { border-color: var(--signal); }
 .act:hover { background: var(--signal-sunk); }
 .act[disabled] { background: var(--graticule); border-color: var(--graticule);
                  color: var(--ink-faint); cursor: default; }
+.hint { margin-top: 10px; font-size: 12.5px; color: var(--ink-faint); }
 .suggest { margin-top: 14px; }
 .suggest-lead { font-size: 12.5px; color: var(--ink-soft); margin-bottom: 6px; }
 .suggest button {
@@ -305,10 +311,21 @@ textarea#query:focus { border-color: var(--signal); }
            font-size: 13.5px; margin-top: 12px; }
 .working { color: var(--ink-soft); }
 
+/* Not enough width for three columns: the question moves under the details,
+   and both stop being sticky so they cannot fight over the same edge. */
+@media (max-width: 1240px) {
+  main {
+    grid-template-columns: var(--rail) minmax(0, 1fr);
+    grid-template-areas: "ask stage" "rail stage";
+  }
+  .ask { border-left: 0; border-right: 1px solid var(--graticule);
+         border-bottom: 1px solid var(--graticule); }
+  .rail-inner, .ask-inner { position: static; max-height: none; }
+}
 @media (max-width: 940px) {
-  main { grid-template-columns: 1fr; }
-  .rail { position: static; max-height: none; border-right: 0;
-          border-bottom: 1px solid var(--ink); }
+  main { grid-template-columns: 1fr; grid-template-areas: "rail" "ask" "stage"; }
+  .rail, .ask { border-right: 0; border-left: 0;
+                border-bottom: 1px solid var(--ink); }
   .stage { padding: 20px 18px 48px; }
   .stage-row { grid-template-columns: 22px 1fr auto; }
   .stage-kind { grid-column: 2; }
@@ -348,16 +365,23 @@ textarea#query:focus { border-color: var(--signal); }
       <div id="checks"></div>
     </div>
 
-    <div class="block" id="query-block" hidden>
-      <h2>Question</h2>
-      <textarea id="query" placeholder="Type a question, or pick one below"></textarea>
-      <button class="act" id="run">Run query</button>
-      <div class="suggest" id="suggest"></div>
-    </div>
    </div>
   </section>
 
   <section class="stage" id="stage" aria-live="polite"></section>
+
+  <aside class="ask">
+   <div class="ask-inner">
+    <div class="block">
+      <h2>Question</h2>
+      <textarea id="query" disabled
+                placeholder="Load imagery first, then ask about it"></textarea>
+      <button class="act" id="run" disabled>Run query</button>
+      <p class="hint" id="ask-hint">Load imagery on the left to ask a question.</p>
+      <div class="suggest" id="suggest"></div>
+    </div>
+   </div>
+  </aside>
 </main>
 
 <script>
@@ -522,8 +546,13 @@ function renderSession(data) {
     : "";
   $("suggest").querySelectorAll("button").forEach((b) =>
     b.addEventListener("click", () => { $("query").value = b.textContent; $("query").focus(); }));
-  $("query-block").hidden = false;
+  $("query").disabled = !ok;
+  $("query").placeholder = ok ? "Type a question, or pick one below"
+                              : "These images cannot be analysed together";
   $("run").disabled = !ok;
+  $("ask-hint").textContent = ok
+    ? "" : "The images were refused, so there is nothing to ask about them.";
+  $("ask-hint").hidden = ok;
   if (suggestions.length && !$("query").value) $("query").value = suggestions[0];
 
   currentRun = null;
